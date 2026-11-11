@@ -1,0 +1,10 @@
+{
+  "region": "성수",
+  "date": "2026-11-14",
+  "startTime": "13:00",
+  "endTime": "19:00",
+  "budget": 120000,
+  "transport": "walk",
+  "mustVisit": "공방",
+  "preferredTags": ["조용함", "감성"]
+}
