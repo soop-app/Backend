@@ -91,6 +91,88 @@ const base = {
   transport: 'walk',
 };
 
+describe('장바구니 코스 설정 · 경로 입력 묶음', () => {
+  const settings = {
+    start: { name: '성수역 3번 출구', lat: 37.5447, lng: 127.0557 },
+    transport: 'walk',
+    budgetMin: 30000,
+    budgetMax: 80000,
+  };
+  const put = (app: ReturnType<typeof appWith>, body: object, user = USER) =>
+    request(app).put('/api/cart/settings').set('X-User-Id', user).send(body);
+
+  it('처음엔 기본값(도보, 출발 위치·예산 없음)', async () => {
+    const res = await request(appWith()).get('/api/cart').set('X-User-Id', USER);
+    expect(res.body.settings).toEqual({ start: null, transport: 'walk', budgetMin: null, budgetMax: null });
+    expect(res.body.budget).toEqual({ costForTwo: 0, budgetMax: null, remaining: null, overBudget: false });
+  });
+
+  it('설정 저장 → 예산 비교(2인 기준)', async () => {
+    const app = appWith();
+    await add(app, 'db:1'); // 1인 7,500
+    await add(app, 'db:3'); // 1인 21,500
+    const res = await put(app, settings);
+    expect(res.status).toBe(200);
+    expect(res.body.settings).toEqual(settings);
+    expect(res.body.budget).toEqual({ costForTwo: 58000, budgetMax: 80000, remaining: 22000, overBudget: false });
+    const over = await put(app, { ...settings, budgetMax: 50000 });
+    expect(over.body.budget).toMatchObject({ remaining: -8000, overBudget: true });
+    // 다른 사용자에게는 영향 없음
+    const other = await request(app).get('/api/cart').set('X-User-Id', OTHER_USER);
+    expect(other.body.settings.start).toBeNull();
+  });
+
+  it('출발 위치를 지울 수 있음(null)', async () => {
+    const app = appWith();
+    await put(app, settings);
+    const res = await put(app, { ...settings, start: null, transport: 'car' });
+    expect(res.body.settings).toMatchObject({ start: null, transport: 'car' });
+  });
+
+  it('잘못된 설정은 400', async () => {
+    const app = appWith();
+    expect((await put(app, { ...settings, transport: 'bus' })).status).toBe(400);
+    expect((await put(app, { ...settings, budgetMin: 90000 })).status).toBe(400); // 최소 > 최대
+    expect((await put(app, { ...settings, start: { name: '성수역' } })).status).toBe(400); // 좌표 없음
+    expect((await put(app, { ...settings, extra: 1 })).status).toBe(400); // 모르는 필드
+    const { budgetMax: _omit, ...missing } = settings;
+    expect((await put(app, missing)).status).toBe(400); // 네 값 모두 필요
+    expect((await request(app).put('/api/cart/settings').send(settings)).status).toBe(400); // X-User-Id 없음
+  });
+
+  it('route-input: 비었으면 ready=false + 모자란 값 알려줌', async () => {
+    const res = await request(appWith()).get('/api/cart/route-input').set('X-User-Id', USER);
+    expect(res.body).toMatchObject({ ready: false, missing: ['places', 'start'], places: [] });
+  });
+
+  it('route-input: 순서·좌표·필수 고정·설정을 한 번에', async () => {
+    const app = appWith();
+    await add(app, 'db:1');
+    await add(app, 'db:3');
+    await request(app).patch('/api/cart/items/db:3').set('X-User-Id', USER).send({ pinned: true });
+    await request(app).put('/api/cart/order').set('X-User-Id', USER).send({ placeIds: ['db:3', 'db:1'] });
+    await put(app, settings);
+    const res = await request(app).get('/api/cart/route-input').set('X-User-Id', USER);
+    expect(res.body).toMatchObject({
+      ready: true,
+      missing: [],
+      start: settings.start,
+      transport: 'walk',
+      budgetMin: 30000,
+      budgetMax: 80000,
+    });
+    expect(res.body.places.map((p: { order: number; placeId: string; pinned: boolean }) => [p.order, p.placeId, p.pinned])).toEqual([
+      [1, 'db:3', true],
+      [2, 'db:1', false],
+    ]);
+    const first = res.body.places[0];
+    expect(typeof first.lat).toBe('number');
+    expect(typeof first.lng).toBe('number');
+    expect(first).toHaveProperty('stayMinutes');
+    expect(first).toHaveProperty('pricePerPerson', 21500);
+  });
+});
+
 describe('POST /api/courses/optimize', () => {
   it('담은 장소로 최적 경로: 시간이 이어지고, 영업시간 안, 비용·소요시간 합계', async () => {
     const app = appWith();

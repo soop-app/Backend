@@ -1,5 +1,23 @@
 import type pg from 'pg';
-import { CART_MAX, sameSet, type CartItem, type CartRepository, type PlaceSnapshot } from './cartRepository.js';
+import {
+  CART_MAX,
+  DEFAULT_CART_SETTINGS,
+  sameSet,
+  type CartItem,
+  type CartRepository,
+  type CartSettings,
+  type PlaceSnapshot,
+  type Transport,
+} from './cartRepository.js';
+
+interface SettingsRow {
+  start_name: string | null;
+  start_lat: number | null;
+  start_lng: number | null;
+  transport: Transport;
+  budget_min: number | null;
+  budget_max: number | null;
+}
 
 interface CartRow {
   place_key: string;
@@ -73,6 +91,37 @@ export class PostgresCartRepository implements CartRepository {
       }
       return true;
     });
+  }
+
+  async getSettings(userId: string): Promise<CartSettings> {
+    const { rows } = await this.pool.query<SettingsRow>(
+      `SELECT start_name, start_lat, start_lng, transport, budget_min, budget_max
+       FROM cart_settings WHERE user_id = $1`,
+      [userId],
+    );
+    const r = rows[0];
+    if (!r) return structuredClone(DEFAULT_CART_SETTINGS);
+    return {
+      start:
+        r.start_name !== null && r.start_lat !== null && r.start_lng !== null
+          ? { name: r.start_name, lat: r.start_lat, lng: r.start_lng }
+          : null,
+      transport: r.transport,
+      budgetMin: r.budget_min,
+      budgetMax: r.budget_max,
+    };
+  }
+
+  async saveSettings(userId: string, s: CartSettings): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO cart_settings (user_id, start_name, start_lat, start_lng, transport, budget_min, budget_max, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+       ON CONFLICT (user_id) DO UPDATE SET
+         start_name = EXCLUDED.start_name, start_lat = EXCLUDED.start_lat, start_lng = EXCLUDED.start_lng,
+         transport = EXCLUDED.transport, budget_min = EXCLUDED.budget_min, budget_max = EXCLUDED.budget_max,
+         updated_at = now()`,
+      [userId, s.start?.name ?? null, s.start?.lat ?? null, s.start?.lng ?? null, s.transport, s.budgetMin, s.budgetMax],
+    );
   }
 
   private async tx<T>(fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {

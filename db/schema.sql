@@ -61,3 +61,19 @@ CREATE TABLE IF NOT EXISTS cart_items (
   added_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, place_key)
 );
+
+-- v0.3: 내 코스 화면의 "코스 설정" (사용자마다 1줄)
+-- 출발 위치는 이름·좌표를 함께 저장해야 경로 계산에 바로 쓸 수 있습니다.
+CREATE TABLE IF NOT EXISTS cart_settings (
+  user_id     TEXT PRIMARY KEY,
+  start_name  TEXT,
+  start_lat   DOUBLE PRECISION CHECK (start_lat BETWEEN -90 AND 90),
+  start_lng   DOUBLE PRECISION CHECK (start_lng BETWEEN -180 AND 180),
+  transport   TEXT NOT NULL DEFAULT 'walk' CHECK (transport IN ('walk', 'car')),
+  budget_min  INTEGER CHECK (budget_min >= 0),
+  budget_max  INTEGER CHECK (budget_max >= 0),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- 출발 위치는 이름·위도·경도가 모두 있거나 모두 없어야 함
+  CHECK ((start_name IS NULL) = (start_lat IS NULL) AND (start_lat IS NULL) = (start_lng IS NULL)),
+  CHECK (budget_min IS NULL OR budget_max IS NULL OR budget_min <= budget_max)
+);

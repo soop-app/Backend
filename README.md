@@ -55,6 +55,8 @@ curl.exe -X POST http://localhost:3000/api/courses/optimize -H "X-User-Id: my-te
 | DELETE | `/api/cart/items/:placeId` | 내 코스 휴지통 | 빼기 |
 | PATCH | `/api/cart/items/:placeId` | 내 코스 `필수로 고정` | `{ "pinned": true }` |
 | PUT | `/api/cart/order` | 내 코스 ▲▼ | `{ "placeIds": ["db:3", "db:1"] }` (담긴 전체를 원하는 순서로) |
+| PUT | `/api/cart/settings` | 내 코스 `코스 설정` | 출발 위치·이동 수단·예산 저장 (아래) |
+| GET | `/api/cart/route-input` | (경로 최적화용) | 계산에 필요한 값만 한 번에 (아래) |
 | POST | `/api/courses/optimize` | `최적 경로 만들기` → 완성된 코스 | 방문 순서·시간·비용 계산 |
 | POST | `/api/courses/recommend` | (보류) | 조건만으로 자동 추천 — 기획상 '고급 AI 코스 생성' 때 다시 사용 |
 
@@ -74,6 +76,60 @@ curl.exe -X POST http://localhost:3000/api/courses/optimize -H "X-User-Id: my-te
 | transport | `walk` / `car` | 검색 반경 (도보 1.5km, 차 5km) |
 
 응답의 장소 하나: `id, source(db/kakao), name, category, categoryLabel, subCategory(예: 소품샵), description, imageUrl(null이면 기본 이미지), address, lat, lng, nearestStation{name, walkMinutes}, pricePerPerson, priceVerified, isIndoor, stayMinutes, hoursOnDate{open, close}, openStatus(open/closed/unknown), matchPercent, mapUrl, inCart`
+
+### 장바구니 응답 `GET /api/cart` (담기·빼기·고정·순서·설정 응답도 같은 모양)
+
+```json
+{
+  "items": [
+    { "order": 1, "placeId": "db:1", "pinned": false, "addedAt": "...",
+      "place": { "id": "db:1", "name": "...", "category": "cafe", "categoryLabel": "카페", "subCategory": null,
+                 "imageUrl": null, "address": "...", "lat": 37.54, "lng": 127.05,
+                 "nearestStation": { "name": "성수역", "walkMinutes": 8 },
+                 "pricePerPerson": 7500, "priceVerified": true, "stayMinutes": 60, "mapUrl": "..." } }
+  ],
+  "count": 1, "max": 5,
+  "costPerPerson": 7500, "costForTwo": 15000, "unknownPriceCount": 0,
+  "settings": { "start": { "name": "성수역 3번 출구", "lat": 37.5447, "lng": 127.0557 },
+                "transport": "walk", "budgetMin": 30000, "budgetMax": 80000 },
+  "budget": { "costForTwo": 15000, "budgetMax": 80000, "remaining": 65000, "overBudget": false }
+}
+```
+- `budget`은 **비용과 예산을 둘 다 2인 기준**으로 비교해요. 디자인의 "N원 여유"는 `budget.remaining`을 쓰면 돼요.
+
+### 코스 설정 `PUT /api/cart/settings`
+
+```json
+{
+  "start": { "name": "성수역 3번 출구", "lat": 37.5447, "lng": 127.0557 },
+  "transport": "walk",
+  "budgetMin": 30000,
+  "budgetMax": 80000
+}
+```
+- 네 값을 **매번 모두** 보내요 (통째로 바꿈). 안 정한 값은 `null` (`transport` 제외: `"walk"` / `"car"`).
+- 출발 위치는 **좌표까지 함께** 저장해요. 좌표 없이 이름만 보내면 400.
+- 처음 상태: `{ start: null, transport: "walk", budgetMin: null, budgetMax: null }`
+
+### 경로 최적화 입력 묶음 `GET /api/cart/route-input` (4주차 담당용)
+
+```json
+{
+  "ready": true,
+  "missing": [],
+  "start": { "name": "성수역 3번 출구", "lat": 37.5447, "lng": 127.0557 },
+  "transport": "walk",
+  "budgetMin": 30000,
+  "budgetMax": 80000,
+  "places": [
+    { "order": 1, "placeId": "db:3", "name": "...", "category": "restaurant",
+      "lat": 37.54, "lng": 127.05, "pinned": true, "stayMinutes": 70, "pricePerPerson": 21500 }
+  ]
+}
+```
+- `places`는 사용자가 정한 순서, `pinned: true`는 필수 고정 장소.
+- `ready: false`면 `missing`에 모자란 값이 있어요: `"places"`(담은 장소 없음), `"start"`(출발 위치 없음).
+- 코드에서 바로 쓰려면 `CartService.routeInput(userId)`를 불러도 같은 값이 나와요.
 
 ### 최적 경로 `POST /api/courses/optimize`
 
@@ -109,7 +165,7 @@ curl.exe -X POST http://localhost:3000/api/courses/optimize -H "X-User-Id: my-te
 
 ## 4. 아직 정하지 않은 것 (팀 협의)
 
-- **예산 기준**: 홈은 2인 총예산인데 디자인의 '예상 총비용'은 1인 가격 합계 → API는 1인·2인을 둘 다 줘요
+- **예산 기준**: 디자인 홈에 '총 예산 (2인)'으로 확정. 그런데 내 코스의 '예상 총비용'은 1인 가격 합계라 'N원 여유'가 맞지 않아요 → API는 1인·2인을 둘 다 주고, `budget.remaining`은 2인끼리 비교해요
 - **사진**: 카카오는 사진을 안 줘요. 우리 DB `image_url`(직접 찍었거나 허락받은 사진) + 없으면 카테고리별 기본 이미지
 - **취향 일치율**: 지금은 임시 계산식(취향 태그 중 장소가 가진 비율). 취향 조사 생기면 다시 정하기
 - **소품샵**: 필터 칩에 없어서 지금은 '체험' 안의 세부 분류(`subCategory`)

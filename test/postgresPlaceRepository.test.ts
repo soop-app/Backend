@@ -62,6 +62,7 @@ describe.skipIf(!url)('PostgresCartRepository (실제 DB)', async () => {
   const user = `pgtest-${Date.now()}`;
   afterAll(async () => {
     await pool.query('DELETE FROM cart_items WHERE user_id = $1', [user]);
+    await pool.query('DELETE FROM cart_settings WHERE user_id = $1', [user]);
     await pool.end();
   });
   const item = (n: number) => ({
@@ -91,5 +92,14 @@ describe.skipIf(!url)('PostgresCartRepository (실제 DB)', async () => {
     expect(results.filter((r) => r === 'added')).toHaveLength(5);
     expect(results.filter((r) => r === 'full')).toHaveLength(1);
     await pool.query('DELETE FROM cart_items WHERE user_id = $1', [u]);
+  });
+
+  it('코스 설정: 기본값 → 저장 → 덮어쓰기(출발 위치 지우기)', async () => {
+    expect(await repo.getSettings(user)).toEqual({ start: null, transport: 'walk', budgetMin: null, budgetMax: null });
+    const s = { start: { name: '성수역 3번 출구', lat: 37.5447, lng: 127.0557 }, transport: 'car' as const, budgetMin: 30000, budgetMax: 80000 };
+    await repo.saveSettings(user, s);
+    expect(await repo.getSettings(user)).toEqual(s);
+    await repo.saveSettings(user, { ...s, start: null, budgetMin: null });
+    expect(await repo.getSettings(user)).toEqual({ ...s, start: null, budgetMin: null });
   });
 });

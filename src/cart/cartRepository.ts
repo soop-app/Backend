@@ -29,6 +29,25 @@ export interface CartItem {
 
 export const CART_MAX = 5;
 
+export type Transport = 'walk' | 'car';
+
+/** 내 코스 화면 아래쪽 "코스 설정" (출발 위치 · 이동 수단 · 예산) */
+export interface CartSettings {
+  /** 출발 위치. 아직 안 정했으면 null */
+  start: { name: string; lat: number; lng: number } | null;
+  transport: Transport;
+  /** 두 사람 합산 예산(원). 안 정했으면 null */
+  budgetMin: number | null;
+  budgetMax: number | null;
+}
+
+export const DEFAULT_CART_SETTINGS: CartSettings = {
+  start: null,
+  transport: 'walk', // 디자인 기본값: 도보
+  budgetMin: null,
+  budgetMax: null,
+};
+
 /**
  * 장바구니 저장소. 메모리 버전(개발용)과 PostgreSQL 버전이 같은 모양을 따릅니다.
  * 목록은 항상 사용자가 정한 순서대로 돌려줍니다.
@@ -43,6 +62,10 @@ export interface CartRepository {
   setPinned(userId: string, placeId: string, pinned: boolean): Promise<boolean>;
   /** placeIds 가 지금 담긴 목록과 정확히 같은 구성이어야 함. 아니면 false */
   reorder(userId: string, placeIds: string[]): Promise<boolean>;
+  /** 저장된 코스 설정. 없으면 기본값 */
+  getSettings(userId: string): Promise<CartSettings>;
+  /** 코스 설정을 통째로 바꿈 */
+  saveSettings(userId: string, settings: CartSettings): Promise<void>;
 }
 
 export function toSnapshot(v: PlaceView): PlaceSnapshot {
@@ -71,6 +94,7 @@ const sameSet = (a: string[], b: string[]) =>
 /** DB 없이 돌려볼 때 쓰는 메모리 저장소 */
 export class InMemoryCartRepository implements CartRepository {
   private readonly carts = new Map<string, CartItem[]>();
+  private readonly settings = new Map<string, CartSettings>();
 
   async list(userId: string) {
     return [...(this.carts.get(userId) ?? [])];
@@ -103,6 +127,14 @@ export class InMemoryCartRepository implements CartRepository {
     if (!sameSet(placeIds, cart.map((i) => i.placeId))) return false;
     this.carts.set(userId, placeIds.map((id) => cart.find((i) => i.placeId === id)!));
     return true;
+  }
+
+  async getSettings(userId: string) {
+    return structuredClone(this.settings.get(userId) ?? DEFAULT_CART_SETTINGS);
+  }
+
+  async saveSettings(userId: string, settings: CartSettings) {
+    this.settings.set(userId, structuredClone(settings));
   }
 }
 
